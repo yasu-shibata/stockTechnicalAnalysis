@@ -73,7 +73,7 @@ def calculate_returns(data):
     latest_price = data['Close'].iloc[-1]
     
     # YTD return
-    year_start = pd.Timestamp(latest_date.year, 1, 1)
+    year_start = pd.Timestamp(latest_date.year, 1, 1, tz=latest_date.tz)
     ytd_data = data[data.index >= year_start]
     if len(ytd_data) > 0:
         ytd_start_price = ytd_data['Close'].iloc[0]
