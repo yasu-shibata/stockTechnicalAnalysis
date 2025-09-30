@@ -373,21 +373,15 @@ def main():
             
             # Color code the Signal column
             def color_signal(val):
-                if val in ['Strong Buy']:
-                    return 'background-color: #006400; color: white'
-                elif val in ['Buy']:
+                if val == 'BULLISH':
                     return 'background-color: #90EE90'
-                elif val in ['Neutral']:
-                    return 'background-color: #D3D3D3'
-                elif val in ['Sell']:
-                    return 'background-color: #FFA500'
-                elif val in ['Strong Sell']:
-                    return 'background-color: #FF0000; color: white'
+                elif val == 'BEARISH':
+                    return 'background-color: #FFB6C6'
                 else:
-                    return ''
+                    return 'background-color: #D3D3D3'
             
             st.dataframe(
-                df_summary.style.applymap(color_signal, subset=['Buy Signal']),
+                df_summary.style.applymap(color_signal, subset=['Signal']),
                 use_container_width=True,
                 hide_index=True
             )
@@ -486,35 +480,17 @@ def main():
         
         st.markdown("""
         ### Features
-        - Single or multi-stock analysis
-        - **Buy Signal Scoring (0-10)**: Comprehensive buy timing analysis
-        - MACD crossover tracking with days since crossover
-        - Comprehensive technical indicators (RSI, Bollinger Bands, Volume, ATR)
-        - Sector ETF comparison
-        - Visual charts and metrics
+        - 📊 Single or multi-stock analysis
+        - 📈 MACD crossover tracking
+        - 🎯 Comprehensive technical indicators (RSI, Bollinger Bands, Volume, ATR)
+        - 🔄 Sector ETF comparison
+        - 📉 Visual charts and metrics
         
         ### How to Use
         1. Select analysis mode in the sidebar
         2. Enter stock symbol(s)
         3. Choose date range
         4. Click 'Analyze'
-        
-        ### Buy Signal Scoring
-        
-        **Score Range:**
-        - **7-10 (Strong Buy)**: Multiple bullish signals aligned
-        - **5-6 (Buy)**: Generally positive momentum
-        - **3-4 (Neutral)**: Mixed signals
-        - **1-2 (Sell)**: Bearish indicators present
-        - **0 (Strong Sell)**: Multiple bearish signals
-        
-        **Scoring Factors:**
-        - RSI oversold (<30): +3 points
-        - MACD bullish crossover: +2 points
-        - Recent bullish cross (≤5 days): +1 point
-        - Strong uptrend: +2 points
-        - Near lower Bollinger Band: +2 points
-        - (Negative points for bearish signals)
         
         ### Popular Symbols
         - Tech: AAPL, MSFT, GOOGL, AMZN, NVDA
