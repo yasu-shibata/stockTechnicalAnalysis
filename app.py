@@ -73,7 +73,7 @@ def calculate_returns(data):
     latest_price = data['Close'].iloc[-1]
     
     # YTD return
-    year_start = dt.datetime(latest_date.year, 1, 1)
+    year_start = pd.Timestamp(latest_date.year, 1, 1)
     ytd_data = data[data.index >= year_start]
     if len(ytd_data) > 0:
         ytd_start_price = ytd_data['Close'].iloc[0]
@@ -82,7 +82,7 @@ def calculate_returns(data):
         ytd_return = None
     
     # 1Y return
-    one_year_ago = latest_date - dt.timedelta(days=365)
+    one_year_ago = latest_date - pd.Timedelta(days=365)
     one_year_data = data[data.index >= one_year_ago]
     if len(one_year_data) > 0:
         one_year_start_price = one_year_data['Close'].iloc[0]
