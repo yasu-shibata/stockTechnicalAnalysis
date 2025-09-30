@@ -67,6 +67,31 @@ def get_stock_info(symbol):
     except:
         return {'name': symbol, 'sector': 'N/A', 'industry': 'N/A'}
 
+def calculate_returns(data):
+    """Calculate YTD and 1Y returns"""
+    latest_date = data.index[-1]
+    latest_price = data['Close'].iloc[-1]
+    
+    # YTD return
+    year_start = dt.datetime(latest_date.year, 1, 1)
+    ytd_data = data[data.index >= year_start]
+    if len(ytd_data) > 0:
+        ytd_start_price = ytd_data['Close'].iloc[0]
+        ytd_return = ((latest_price / ytd_start_price) - 1) * 100
+    else:
+        ytd_return = None
+    
+    # 1Y return
+    one_year_ago = latest_date - dt.timedelta(days=365)
+    one_year_data = data[data.index >= one_year_ago]
+    if len(one_year_data) > 0:
+        one_year_start_price = one_year_data['Close'].iloc[0]
+        one_year_return = ((latest_price / one_year_start_price) - 1) * 100
+    else:
+        one_year_return = None
+    
+    return ytd_return, one_year_return
+
 def calculate_macd_crossover_days(macd_series, signal_series):
     """Calculate days since MACD crossover"""
     days_since_crossover = []
@@ -279,7 +304,7 @@ def main():
         with col1:
             start_date = st.date_input(
                 "Start Date",
-                value=dt.date.today() - dt.timedelta(days=365)
+                value=dt.date.today() - dt.timedelta(days=730)  # Extended to 2 years for better YTD/1Y calculation
             )
         with col2:
             end_date = st.date_input(
@@ -354,6 +379,9 @@ def main():
                     prev = data.iloc[-2] if len(data) > 1 else latest
                     signal, _ = calculate_signal_score(data)
                     
+                    # Calculate returns
+                    ytd_return, one_year_return = calculate_returns(data)
+                    
                     crossover_str = ""
                     if not np.isnan(latest['MACD_Crossover_Days']):
                         cross_type = "Bull" if latest['MACD'] > latest['MACD_Signal'] else "Bear"
@@ -363,6 +391,8 @@ def main():
                         'Symbol': symbol,
                         'Price': f"${latest['Close']:.2f}",
                         'Change %': f"{((latest['Close']/prev['Close'])-1)*100:+.2f}%",
+                        'YTD': f"{ytd_return:+.2f}%" if ytd_return is not None else "N/A",
+                        '1Y': f"{one_year_return:+.2f}%" if one_year_return is not None else "N/A",
                         'RSI': f"{latest['RSI']:.1f}",
                         'MACD': f"{latest['MACD_Histogram']:.3f}",
                         'Crossover': crossover_str,
@@ -404,9 +434,12 @@ def main():
             latest = data.iloc[-1]
             prev = data.iloc[-2] if len(data) > 1 else latest
             
+            # Calculate returns
+            ytd_return, one_year_return = calculate_returns(data)
+            
             with st.expander(f"📊 {symbol} - {info['name']}", expanded=(len(symbols) == 1)):
                 # Metrics
-                col1, col2, col3, col4, col5 = st.columns(5)
+                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
                 
                 with col1:
                     price_change = ((latest['Close']/prev['Close'])-1)*100
@@ -417,12 +450,24 @@ def main():
                     )
                 
                 with col2:
-                    st.metric("RSI", f"{latest['RSI']:.1f}")
+                    if ytd_return is not None:
+                        st.metric("YTD", f"{ytd_return:+.2f}%")
+                    else:
+                        st.metric("YTD", "N/A")
                 
                 with col3:
-                    st.metric("MACD", f"{latest['MACD']:.4f}")
+                    if one_year_return is not None:
+                        st.metric("1Y", f"{one_year_return:+.2f}%")
+                    else:
+                        st.metric("1Y", "N/A")
                 
                 with col4:
+                    st.metric("RSI", f"{latest['RSI']:.1f}")
+                
+                with col5:
+                    st.metric("MACD", f"{latest['MACD']:.4f}")
+                
+                with col6:
                     if not np.isnan(latest['MACD_Crossover_Days']):
                         cross_days = int(latest['MACD_Crossover_Days'])
                         cross_type = "Bull" if latest['MACD'] > latest['MACD_Signal'] else "Bear"
@@ -430,12 +475,21 @@ def main():
                     else:
                         st.metric("MACD Cross", "N/A")
                 
-                with col5:
+                with col7:
                     signal, color = calculate_signal_score(data)
                     st.metric("Signal", signal)
                 
                 # Analysis text
                 st.markdown("#### 📋 Technical Summary")
+                
+                # Performance
+                perf_parts = []
+                if ytd_return is not None:
+                    perf_parts.append(f"YTD: {ytd_return:+.2f}%")
+                if one_year_return is not None:
+                    perf_parts.append(f"1Y: {one_year_return:+.2f}%")
+                if perf_parts:
+                    st.write(f"📊 **Performance:** {' | '.join(perf_parts)}")
                 
                 # Trend
                 if latest['Close'] > latest['SMA_20'] > latest['SMA_50']:
@@ -483,6 +537,7 @@ def main():
         - 📊 Single or multi-stock analysis
         - 📈 MACD crossover tracking
         - 🎯 Comprehensive technical indicators (RSI, Bollinger Bands, Volume, ATR)
+        - 📅 YTD and 1-year return tracking
         - 🔄 Sector ETF comparison
         - 📉 Visual charts and metrics
         
