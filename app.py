@@ -397,7 +397,6 @@ def main():
             fig_comparison = plot_comparison_chart(data_dict, symbols)
             st.pyplot(fig_comparison)
             plt.close()
-            
         # Individual analysis
         st.header("🔍 Detailed Analysis")
         
