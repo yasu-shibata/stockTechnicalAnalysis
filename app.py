@@ -1,8 +1,3 @@
-"""
-Streamlit Stock Technical Analysis App
-Multi-stock analyzer with MACD crossover tracking and sector comparison
-"""
-
 import streamlit as st
 import pandas as pd
 import datetime as dt
@@ -65,7 +60,7 @@ def get_stock_info(symbol):
             'industry': info.get('industry', 'N/A')
         }
     except:
-        return {'name': symbol, 'sector': 'N/A', 'industry': 'N/A'}
+        return {'name': symbol, 'sector': symbol, 'industry': 'N/A'}
 
 def calculate_returns(data):
     """Calculate YTD and 1Y returns"""
@@ -73,7 +68,11 @@ def calculate_returns(data):
     latest_price = data['Close'].iloc[-1]
     
     # YTD return
-    year_start = pd.Timestamp(latest_date.year, 1, 1, tz=latest_date.tz)
+    # 最新日付のタイムゾーン情報を取得
+    tz = latest_date.tz
+    # 年初の日付を作成し、タイムゾーンを適用
+    year_start = pd.Timestamp(latest_date.year, 1, 1, tz=tz)
+    
     ytd_data = data[data.index >= year_start]
     if len(ytd_data) > 0:
         ytd_start_price = ytd_data['Close'].iloc[0]
@@ -105,6 +104,7 @@ def calculate_macd_crossover_days(macd_series, signal_series):
         prev_diff = macd_series.iloc[i-1] - signal_series.iloc[i-1]
         curr_diff = macd_series.iloc[i] - signal_series.iloc[i]
         
+        # Crossover detected
         if (prev_diff <= 0 and curr_diff > 0) or (prev_diff >= 0 and curr_diff < 0):
             last_crossover_idx = i
             days_since_crossover.append(0)
@@ -116,7 +116,7 @@ def calculate_macd_crossover_days(macd_series, signal_series):
     return pd.Series(days_since_crossover, index=macd_series.index)
 
 def calculate_technical_indicators(data):
-    """Calculate all technical indicators"""
+    """Calculate all technical indicators including Bollinger Bands (BB)"""
     df = data.copy()
     
     # Moving Averages
@@ -141,11 +141,14 @@ def calculate_technical_indicators(data):
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # Bollinger Bands
-    df['BB_Middle'] = df['Close'].rolling(window=20).mean()
+    # Bollinger Bands (BB) - Window 20, Std Dev 2
     bb_std = df['Close'].rolling(window=20).std()
+    df['BB_Middle'] = df['SMA_20'] # SMA_20と同じ
     df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
     df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    
+    # BB Width Calculation (for Squeeze/Expansion analysis)
+    df['BB_Width'] = df['BB_Upper'] - df['BB_Lower']
     
     # Volume
     df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
@@ -167,20 +170,29 @@ def calculate_signal_score(data):
     buy_signals = 0
     sell_signals = 0
     
+    # SMA 20 Check
     if latest['Close'] > latest['SMA_20']:
         buy_signals += 1
     else:
         sell_signals += 1
     
+    # RSI Check (Overbought/Oversold has higher weight)
     if latest['RSI'] < 30:
         buy_signals += 2
     elif latest['RSI'] > 70:
         sell_signals += 2
     
+    # MACD Check
     if latest['MACD'] > latest['MACD_Signal']:
         buy_signals += 1
     else:
         sell_signals += 1
+        
+    # Bollinger Band Check (Band Walk/Overbought/Oversold)
+    if latest['Close'] > latest['BB_Upper']:
+        sell_signals += 1 # Overbought signal
+    elif latest['Close'] < latest['BB_Lower']:
+        buy_signals += 1 # Oversold signal
     
     if buy_signals > sell_signals:
         return "BULLISH", "green"
@@ -190,15 +202,20 @@ def calculate_signal_score(data):
         return "NEUTRAL", "gray"
 
 def plot_price_chart(data, symbol, info):
-    """Create price chart with indicators"""
+    """Create price chart with indicators including BB"""
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 10), 
                                               gridspec_kw={'height_ratios': [3, 1, 1, 1]})
     
-    # Price chart
+    # Price chart with Moving Averages and Bollinger Bands
     ax1.plot(data.index, data['Close'], linewidth=2, label='Close', color='black')
-    ax1.plot(data.index, data['SMA_20'], label='SMA 20', alpha=0.7, color='blue')
+    ax1.plot(data.index, data['SMA_20'], label='SMA 20 (BB Middle)', alpha=0.7, color='blue')
     ax1.plot(data.index, data['SMA_50'], label='SMA 50', alpha=0.7, color='red')
+    
+    # Bollinger Bands
+    ax1.plot(data.index, data['BB_Upper'], label='+2σ Band', linestyle=':', color='gray', alpha=0.7)
+    ax1.plot(data.index, data['BB_Lower'], label='-2σ Band', linestyle=':', color='gray', alpha=0.7)
     ax1.fill_between(data.index, data['BB_Upper'], data['BB_Lower'], alpha=0.1, color='gray')
+    
     ax1.set_title(f"{symbol} - {info['name']}", fontsize=14, fontweight='bold')
     ax1.set_ylabel('Price ($)')
     ax1.legend(loc='upper left')
@@ -267,6 +284,68 @@ def plot_comparison_chart(data_dict, symbols):
     plt.tight_layout()
     return fig
 
+# --- New Bollinger Band Analysis Functionality ---
+def analyze_bollinger_bands(data):
+    """
+    ボリンジャーバンドの現在の状態を分析し、テキストで返す
+    - 価格がバンドのどこにあるか
+    - ボラティリティの状態 (スクイーズ/エクスパンション)
+    """
+    latest = data.iloc[-1]
+    
+    # 必要なデータが存在しない場合は早期リターン
+    if pd.isna(latest['BB_Upper']) or pd.isna(latest['BB_Lower']) or data['BB_Width'].isnull().all():
+        return "❓ データ不足のため、ボリンジャーバンドの分析はできません。", "❓"
+    
+    # 1. ボラティリティの状態 (収縮 Squeeze / 拡大 Expansion) の判定
+    # 直近のバンド幅を、過去50日間の平均バンド幅と比較
+    latest_bb_width = latest['BB_Width']
+    # 最新日を除いた過去の平均バンド幅 (直近50日間の平均で比較)
+    bb_width_ma_50 = data['BB_Width'].iloc[-51:-1].mean()
+    
+    volatility_status = "通常"
+    volatility_emoji = "➡️"
+    bb_ratio_text = ""
+    
+    if not pd.isna(bb_width_ma_50):
+        # バンド幅の比率を計算
+        bb_ratio = latest_bb_width / bb_width_ma_50
+        bb_ratio_text = f" ({bb_ratio:.2f}x 過去平均)"
+
+        if bb_ratio < 0.8:
+            volatility_status = "**収縮中 (Squeeze)**"
+            volatility_emoji = "🤏"
+        elif bb_ratio > 1.2:
+            volatility_status = "**拡大中 (Expansion)**"
+            volatility_emoji = "💥"
+            
+    # 2. 価格の位置の判定
+    if latest['Close'] > latest['BB_Upper']:
+        position_status = "上側バンド（+2σ）を**超えて推移**"
+        position_emoji = "🔥"
+        # Band Walkの可能性
+        if (data['Close'].iloc[-5:] > data['BB_Upper'].iloc[-5:]).sum() >= 3:
+            position_status += "（強い上昇トレンド継続 - バンドウォークの可能性）"
+    elif latest['Close'] < latest['BB_Lower']:
+        position_status = "下側バンド（-2σ）を**超えて推移**"
+        position_emoji = "🥶"
+        # Band Walkの可能性
+        if (data['Close'].iloc[-5:] < data['BB_Lower'].iloc[-5:]).sum() >= 3:
+            position_status += "（強い下降トレンド継続 - バンドウォークの可能性）"
+    elif latest['Close'] > latest['BB_Middle']:
+        position_status = "ミドルバンド（SMA 20）の**上方**で推移"
+        position_emoji = "🟢"
+    else: # latest['Close'] <= latest['BB_Middle']
+        position_status = "ミドルバンド（SMA 20）の**下方**で推移"
+        position_emoji = "🔴"
+
+    bb_status_text = (
+        f"価格は{position_status}。ボラティリティは{volatility_status}{bb_ratio_text}。"
+    )
+    bb_emoji = f"{position_emoji}{volatility_emoji}"
+    
+    return bb_status_text, bb_emoji
+
 # Main App
 def main():
     st.title("📈 Stock Technical Analysis Dashboard")
@@ -304,7 +383,7 @@ def main():
         with col1:
             start_date = st.date_input(
                 "Start Date",
-                value=dt.date.today() - dt.timedelta(days=730)  # Extended to 2 years for better YTD/1Y calculation
+                value=dt.date.today() - dt.timedelta(days=730)
             )
         with col2:
             end_date = st.date_input(
@@ -331,6 +410,11 @@ def main():
             for idx, symbol in enumerate(symbols):
                 data, error = fetch_stock_data(symbol, start_date, end_date)
                 if data is not None:
+                    # Bollinger Bandに必要な過去50日間の平均バンド幅を計算するため、
+                    # 少なくとも250日程度のデータが必要
+                    if len(data) < 50:
+                        errors.append(f"{symbol}: データ期間が短すぎます (50日以上推奨)")
+                        continue
                     data_dict[symbol] = calculate_technical_indicators(data)
                     info_dict[symbol] = get_stock_info(symbol)
                 else:
@@ -346,7 +430,7 @@ def main():
                     st.warning(error)
         
         if not data_dict:
-            st.error("No data could be fetched. Please check your symbols and try again.")
+            st.error("No data could be fetched. Please check your symbols and date range.")
             return
         
         # Add sector ETF if requested
@@ -387,6 +471,10 @@ def main():
                         cross_type = "Bull" if latest['MACD'] > latest['MACD_Signal'] else "Bear"
                         crossover_str = f"{int(latest['MACD_Crossover_Days'])}d {cross_type}"
                     
+                    # Bollinger Band Info for summary
+                    bb_diff = (latest['Close'] - latest['BB_Middle']) / latest['BB_Width'] if not pd.isna(latest['BB_Width']) and latest['BB_Width'] != 0 else np.nan
+                    bb_diff_str = f"{bb_diff:+.2f}σ" if not np.isnan(bb_diff) else "N/A"
+                    
                     summary_data.append({
                         'Symbol': symbol,
                         'Price': f"${latest['Close']:.2f}",
@@ -395,6 +483,7 @@ def main():
                         '1Y': f"{one_year_return:+.2f}%" if one_year_return is not None else "N/A",
                         'RSI': f"{latest['RSI']:.1f}",
                         'MACD': f"{latest['MACD_Histogram']:.3f}",
+                        'BB Diff': bb_diff_str, # BB情報をサマリーに追加
                         'Crossover': crossover_str,
                         'Signal': signal
                     })
@@ -404,11 +493,11 @@ def main():
             # Color code the Signal column
             def color_signal(val):
                 if val == 'BULLISH':
-                    return 'background-color: #90EE90'
+                    return 'background-color: #90EE90' # LightGreen
                 elif val == 'BEARISH':
-                    return 'background-color: #FFB6C6'
+                    return 'background-color: #FFB6C6' # LightPink
                 else:
-                    return 'background-color: #D3D3D3'
+                    return 'background-color: #D3D3D3' # LightGray
             
             st.dataframe(
                 df_summary.style.applymap(color_signal, subset=['Signal']),
@@ -504,6 +593,11 @@ def main():
                 
                 st.write(f"{trend_emoji} **Trend:** {trend}")
                 
+                # --- 追加したボリンジャーバンド分析 ---
+                bb_text, bb_emoji = analyze_bollinger_bands(data)
+                st.write(f"{bb_emoji} **ボリンジャーバンド (BB):** {bb_text}")
+                # -----------------------------------
+                
                 # RSI
                 if latest['RSI'] > 70:
                     st.write(f"⚠️ **RSI:** Overbought ({latest['RSI']:.1f})")
@@ -536,7 +630,7 @@ def main():
         ### Features
         - 📊 Single or multi-stock analysis
         - 📈 MACD crossover tracking
-        - 🎯 Comprehensive technical indicators (RSI, Bollinger Bands, Volume, ATR)
+        - 🎯 Comprehensive technical indicators (RSI, **Bollinger Bands**, Volume, ATR)
         - 📅 YTD and 1-year return tracking
         - 🔄 Sector ETF comparison
         - 📉 Visual charts and metrics
