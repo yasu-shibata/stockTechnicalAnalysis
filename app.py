@@ -335,10 +335,10 @@ def analyze_bollinger_bands(data):
         if (data['Close'].iloc[-5:] < data['BB_Lower'].iloc[-5:]).sum() >= 3:
             position_status += " (Potential strong downtrend - Band Walk)"
     elif latest['Close'] > latest['BB_Middle']:
-        position_status = "Price is **above** the Middle Band (SMA 20)"
+        position_status = "**above** the Middle Band (SMA 20)"
         position_emoji = "🟢"
     else: # latest['Close'] <= latest['BB_Middle']
-        position_status = "Price is **below** the Middle Band (SMA 20)"
+        position_status = "**below** the Middle Band (SMA 20)"
         position_emoji = "🔴"
 
     bb_status_text = (
