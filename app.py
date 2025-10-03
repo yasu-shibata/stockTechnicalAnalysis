@@ -68,9 +68,9 @@ def calculate_returns(data):
     latest_price = data['Close'].iloc[-1]
     
     # YTD return
-    # 最新日付のタイムゾーン情報を取得
+    # Get timezone info for the latest date
     tz = latest_date.tz
-    # 年初の日付を作成し、タイムゾーンを適用
+    # Create the start of the year timestamp, applying timezone
     year_start = pd.Timestamp(latest_date.year, 1, 1, tz=tz)
     
     ytd_data = data[data.index >= year_start]
@@ -143,7 +143,7 @@ def calculate_technical_indicators(data):
     
     # Bollinger Bands (BB) - Window 20, Std Dev 2
     bb_std = df['Close'].rolling(window=20).std()
-    df['BB_Middle'] = df['SMA_20'] # SMA_20と同じ
+    df['BB_Middle'] = df['SMA_20']
     df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
     df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
     
@@ -284,63 +284,65 @@ def plot_comparison_chart(data_dict, symbols):
     plt.tight_layout()
     return fig
 
-# --- New Bollinger Band Analysis Functionality ---
+# --- Bollinger Band Analysis Functionality ---
 def analyze_bollinger_bands(data):
     """
-    ボリンジャーバンドの現在の状態を分析し、テキストで返す
-    - 価格がバンドのどこにあるか
-    - ボラティリティの状態 (スクイーズ/エクスパンション)
+    Analyzes the current state of Bollinger Bands for the stock.
+    Determines price position relative to bands and volatility status (Squeeze/Expansion).
     """
     latest = data.iloc[-1]
     
-    # 必要なデータが存在しない場合は早期リターン
+    # Check for sufficient data
     if pd.isna(latest['BB_Upper']) or pd.isna(latest['BB_Lower']) or data['BB_Width'].isnull().all():
-        return "❓ データ不足のため、ボリンジャーバンドの分析はできません。", "❓"
+        return "❓ Insufficient data for Bollinger Band analysis.", "❓"
     
-    # 1. ボラティリティの状態 (収縮 Squeeze / 拡大 Expansion) の判定
-    # 直近のバンド幅を、過去50日間の平均バンド幅と比較
+    # 1. Volatility Status (Squeeze / Expansion)
+    # Compare recent band width to the 50-day average band width
     latest_bb_width = latest['BB_Width']
-    # 最新日を除いた過去の平均バンド幅 (直近50日間の平均で比較)
+    # Calculate the average width of the previous 50 days (excluding the latest day)
     bb_width_ma_50 = data['BB_Width'].iloc[-51:-1].mean()
     
-    volatility_status = "通常"
+    volatility_status = "Normal"
     volatility_emoji = "➡️"
     bb_ratio_text = ""
     
     if not pd.isna(bb_width_ma_50):
-        # バンド幅の比率を計算
+        # Calculate the band width ratio
         bb_ratio = latest_bb_width / bb_width_ma_50
-        bb_ratio_text = f" ({bb_ratio:.2f}x 過去平均)"
+        bb_ratio_text = f" ({bb_ratio:.2f}x historical avg)"
 
         if bb_ratio < 0.8:
-            volatility_status = "**収縮中 (Squeeze)**"
+            volatility_status = "**Squeeze** (Low Volatility)"
             volatility_emoji = "🤏"
         elif bb_ratio > 1.2:
-            volatility_status = "**拡大中 (Expansion)**"
+            volatility_status = "**Expansion** (High Volatility)"
             volatility_emoji = "💥"
             
-    # 2. 価格の位置の判定
+    # 2. Price Position
+    position_status = ""
+    position_emoji = ""
+    
     if latest['Close'] > latest['BB_Upper']:
-        position_status = "上側バンド（+2σ）を**超えて推移**"
+        position_status = "Price is **trading above** the Upper Band (+2σ)"
         position_emoji = "🔥"
-        # Band Walkの可能性
+        # Check for potential Band Walk (closed above upper band at least 3 of the last 5 days)
         if (data['Close'].iloc[-5:] > data['BB_Upper'].iloc[-5:]).sum() >= 3:
-            position_status += "（強い上昇トレンド継続 - バンドウォークの可能性）"
+            position_status += " (Potential strong uptrend - Band Walk)"
     elif latest['Close'] < latest['BB_Lower']:
-        position_status = "下側バンド（-2σ）を**超えて推移**"
+        position_status = "Price is **trading below** the Lower Band (-2σ)"
         position_emoji = "🥶"
-        # Band Walkの可能性
+        # Check for potential Band Walk (closed below lower band at least 3 of the last 5 days)
         if (data['Close'].iloc[-5:] < data['BB_Lower'].iloc[-5:]).sum() >= 3:
-            position_status += "（強い下降トレンド継続 - バンドウォークの可能性）"
+            position_status += " (Potential strong downtrend - Band Walk)"
     elif latest['Close'] > latest['BB_Middle']:
-        position_status = "ミドルバンド（SMA 20）の**上方**で推移"
+        position_status = "Price is **above** the Middle Band (SMA 20)"
         position_emoji = "🟢"
     else: # latest['Close'] <= latest['BB_Middle']
-        position_status = "ミドルバンド（SMA 20）の**下方**で推移"
+        position_status = "Price is **below** the Middle Band (SMA 20)"
         position_emoji = "🔴"
 
     bb_status_text = (
-        f"価格は{position_status}。ボラティリティは{volatility_status}{bb_ratio_text}。"
+        f"The price is: {position_status}. Volatility is currently: {volatility_status}{bb_ratio_text}."
     )
     bb_emoji = f"{position_emoji}{volatility_emoji}"
     
@@ -410,10 +412,9 @@ def main():
             for idx, symbol in enumerate(symbols):
                 data, error = fetch_stock_data(symbol, start_date, end_date)
                 if data is not None:
-                    # Bollinger Bandに必要な過去50日間の平均バンド幅を計算するため、
-                    # 少なくとも250日程度のデータが必要
+                    # Check for enough data to calculate BB and volatility average (50 days)
                     if len(data) < 50:
-                        errors.append(f"{symbol}: データ期間が短すぎます (50日以上推奨)")
+                        errors.append(f"{symbol}: Data range is too short (50+ days recommended)")
                         continue
                     data_dict[symbol] = calculate_technical_indicators(data)
                     info_dict[symbol] = get_stock_info(symbol)
@@ -471,9 +472,9 @@ def main():
                         cross_type = "Bull" if latest['MACD'] > latest['MACD_Signal'] else "Bear"
                         crossover_str = f"{int(latest['MACD_Crossover_Days'])}d {cross_type}"
                     
-                    # Bollinger Band Info for summary
+                    # Bollinger Band Info for summary (Distance from Middle Band in Std Devs)
                     bb_diff = (latest['Close'] - latest['BB_Middle']) / latest['BB_Width'] if not pd.isna(latest['BB_Width']) and latest['BB_Width'] != 0 else np.nan
-                    bb_diff_str = f"{bb_diff:+.2f}σ" if not np.isnan(bb_diff) else "N/A"
+                    bb_diff_str = f"{bb_diff * 2:.2f}σ" if not np.isnan(bb_diff) else "N/A"
                     
                     summary_data.append({
                         'Symbol': symbol,
@@ -482,8 +483,8 @@ def main():
                         'YTD': f"{ytd_return:+.2f}%" if ytd_return is not None else "N/A",
                         '1Y': f"{one_year_return:+.2f}%" if one_year_return is not None else "N/A",
                         'RSI': f"{latest['RSI']:.1f}",
-                        'MACD': f"{latest['MACD_Histogram']:.3f}",
-                        'BB Diff': bb_diff_str, # BB情報をサマリーに追加
+                        'MACD Hist': f"{latest['MACD_Histogram']:.3f}",
+                        'BB Diff': bb_diff_str, # BB info added to summary
                         'Crossover': crossover_str,
                         'Signal': signal
                     })
@@ -593,10 +594,10 @@ def main():
                 
                 st.write(f"{trend_emoji} **Trend:** {trend}")
                 
-                # --- 追加したボリンジャーバンド分析 ---
+                # --- Bollinger Band Analysis ---
                 bb_text, bb_emoji = analyze_bollinger_bands(data)
-                st.write(f"{bb_emoji} **ボリンジャーバンド (BB):** {bb_text}")
-                # -----------------------------------
+                st.write(f"{bb_emoji} **Bollinger Bands (BB):** {bb_text}")
+                # -----------------------------
                 
                 # RSI
                 if latest['RSI'] > 70:
