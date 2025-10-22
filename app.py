@@ -122,6 +122,7 @@ def calculate_technical_indicators(data):
     # Moving Averages
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_75'] = df['Close'].rolling(window=75).mean()  # ← 追加
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     
     # EMA
@@ -210,6 +211,7 @@ def plot_price_chart(data, symbol, info):
     ax1.plot(data.index, data['Close'], linewidth=2, label='Close', color='black')
     ax1.plot(data.index, data['SMA_20'], label='SMA 20 (BB Middle)', alpha=0.7, color='blue')
     ax1.plot(data.index, data['SMA_50'], label='SMA 50', alpha=0.7, color='red')
+    ax1.plot(data.index, data['SMA_75'], label='SMA 75', alpha=0.7, color='purple')  # ← 追加
     
     # Bollinger Bands
     ax1.plot(data.index, data['BB_Upper'], label='+2σ Band', linestyle=':', color='gray', alpha=0.7)
@@ -582,7 +584,10 @@ def main():
                     st.write(f"📊 **Performance:** {' | '.join(perf_parts)}")
                 
                 # Trend
-                if latest['Close'] > latest['SMA_20'] > latest['SMA_50']:
+                if latest['Close'] > latest['SMA_20'] > latest['SMA_50'] > latest['SMA_75']:
+                    trend = "Very Strong Uptrend"
+                    trend_emoji = "🚀🚀"
+                elif latest['Close'] > latest['SMA_20'] > latest['SMA_50']:
                     trend = "Strong Uptrend"
                     trend_emoji = "🚀"
                 elif latest['Close'] > latest['SMA_20']:
