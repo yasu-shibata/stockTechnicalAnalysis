@@ -533,7 +533,7 @@ def main():
             
             with st.expander(f"📊 {symbol} - {info['name']}", expanded=(len(symbols) == 1)):
                 # Metrics
-                col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
                 
                 with col1:
                     price_change = ((latest['Close']/prev['Close'])-1)*100
