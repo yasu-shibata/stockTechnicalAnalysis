@@ -41,6 +41,7 @@ def fetch_stock_data(symbol, start_date, end_date):
     """Fetch stock data with caching"""
     try:
         ticker = yf.Ticker(symbol)
+        # Ticker infoを同時に取得する必要はないので、一旦historyのみに
         data = ticker.history(start=start_date, end=end_date)
         if not data.empty:
             return data.dropna(), None
@@ -54,11 +55,12 @@ def get_stock_info(symbol):
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info
+        # yfinanceから取得できるBeta値を取得。取得できない場合はNone。
         return {
             'name': info.get('longName', symbol),
             'sector': info.get('sector', 'N/A'),
             'industry': info.get('industry', 'N/A'),
-            'beta': info.get('beta', None)  # ← 追加
+            'beta': info.get('beta', None)
         }
     except:
         return {'name': symbol, 'sector': symbol, 'industry': 'N/A', 'beta': None}
@@ -92,6 +94,40 @@ def calculate_returns(data):
     
     return ytd_return, one_year_return
 
+def calculate_beta(stock_data, benchmark_data):
+    """
+    Calculate Beta using daily returns.
+    Benchmark is assumed to be S&P 500 (^GSPC).
+    """
+    # データの整合性チェック
+    if stock_data.empty or benchmark_data.empty or len(stock_data) < 20 or len(benchmark_data) < 20:
+        return None
+
+    # 共通の日付でデータを揃える
+    combined_data = pd.concat([stock_data['Close'], benchmark_data['Close']], axis=1, join='inner')
+    combined_data.columns = ['Stock', 'Benchmark']
+
+    if combined_data.empty or len(combined_data) < 20:
+        return None
+
+    # 日次リターンの計算
+    stock_returns = combined_data['Stock'].pct_change().dropna()
+    benchmark_returns = combined_data['Benchmark'].pct_change().dropna()
+
+    if stock_returns.empty or benchmark_returns.empty:
+        return None
+
+    # 共分散と分散の計算
+    # pandasのcov()は、Series同士で呼び出すとSeriesの要素間の共分散を返してくれる
+    covariance = stock_returns.cov(benchmark_returns)
+    variance = benchmark_returns.var()
+
+    if variance == 0 or np.isnan(variance) or np.isnan(covariance):
+        return None
+
+    beta = covariance / variance
+    return beta
+
 def calculate_macd_crossover_days(macd_series, signal_series):
     """Calculate days since MACD crossover"""
     days_since_crossover = []
@@ -123,16 +159,16 @@ def calculate_technical_indicators(data):
     # Moving Averages
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_75'] = df['Close'].rolling(window=75).mean()  # ← 追加
+    df['SMA_75'] = df['Close'].rolling(window=75).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     
     # EMA
-    df['EMA_12'] = df['Close'].ewm(span=12).mean()
-    df['EMA_26'] = df['Close'].ewm(span=26).mean()
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean() # adjust=False for typical EMA calculation
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     
     # MACD
     df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
     df['MACD_Crossover_Days'] = calculate_macd_crossover_days(df['MACD'], df['MACD_Signal'])
     
@@ -212,7 +248,7 @@ def plot_price_chart(data, symbol, info):
     ax1.plot(data.index, data['Close'], linewidth=2, label='Close', color='black')
     ax1.plot(data.index, data['SMA_20'], label='SMA 20 (BB Middle)', alpha=0.7, color='blue')
     ax1.plot(data.index, data['SMA_50'], label='SMA 50', alpha=0.7, color='red')
-    ax1.plot(data.index, data['SMA_75'], label='SMA 75', alpha=0.7, color='purple')  # ← 追加
+    ax1.plot(data.index, data['SMA_75'], label='SMA 75', alpha=0.7, color='purple')
     
     # Bollinger Bands
     ax1.plot(data.index, data['BB_Upper'], label='+2σ Band', linestyle=':', color='gray', alpha=0.7)
@@ -411,16 +447,41 @@ def main():
             info_dict = {}
             errors = []
             
+            # 1. ベンチマークデータを取得 (^GSPC: S&P 500)
+            BENCHMARK_SYMBOL = "^GSPC"
+            benchmark_data_raw, benchmark_error = fetch_stock_data(BENCHMARK_SYMBOL, start_date, end_date)
+            
+            if benchmark_data_raw is None:
+                st.warning(f"⚠️ Could not fetch benchmark data ({BENCHMARK_SYMBOL}). Calculated Beta values will be N/A.")
+            
             progress_bar = st.progress(0)
+            
+            # 2. 個別銘柄のデータを取得し、処理
             for idx, symbol in enumerate(symbols):
                 data, error = fetch_stock_data(symbol, start_date, end_date)
+                
                 if data is not None:
-                    # Check for enough data to calculate BB and volatility average (50 days)
+                    # Check for enough data
                     if len(data) < 50:
                         errors.append(f"{symbol}: Data range is too short (50+ days recommended)")
+                        progress_bar.progress((idx + 1) / len(symbols))
                         continue
+                    
                     data_dict[symbol] = calculate_technical_indicators(data)
-                    info_dict[symbol] = get_stock_info(symbol)
+                    info = get_stock_info(symbol)
+                    
+                    # BETA値の補完ロジック
+                    # info['beta']がNone (N/A)で、かつベンチマークデータが取得できている場合
+                    if info['beta'] is None and benchmark_data_raw is not None:
+                        calculated_beta = calculate_beta(data, benchmark_data_raw)
+                        if calculated_beta is not None:
+                            info['beta'] = calculated_beta
+                            # st.toast(f"ℹ️ {symbol}のBETA値を計算して補完しました: {calculated_beta:.2f}", icon='🔧') # Streamlit Cloudではtoastは非推奨/使用不可の場合があるためコメントアウト
+                        else:
+                            # 計算できなかった場合もNoneのままにしておく (表示は'N/A')
+                            info['beta'] = None
+
+                    info_dict[symbol] = info
                 else:
                     errors.append(f"{symbol}: {error}")
                 progress_bar.progress((idx + 1) / len(symbols))
@@ -479,13 +540,16 @@ def main():
                     bb_diff = (latest['Close'] - latest['BB_Middle']) / latest['BB_Width'] if not pd.isna(latest['BB_Width']) and latest['BB_Width'] != 0 else np.nan
                     bb_diff_str = f"{bb_diff * 2:.2f}σ" if not np.isnan(bb_diff) else "N/A"
                     
+                    # Beta value from info_dict (which may have been calculated)
+                    beta_val = info_dict[symbol].get('beta')
+                    
                     summary_data.append({
                         'Symbol': symbol,
                         'Price': f"${latest['Close']:.2f}",
                         'Change %': f"{((latest['Close']/prev['Close'])-1)*100:+.2f}%",
                         'YTD': f"{ytd_return:+.2f}%" if ytd_return is not None else "N/A",
                         '1Y': f"{one_year_return:+.2f}%" if one_year_return is not None else "N/A",
-                        'Beta': f"{info_dict[symbol].get('beta', 'N/A'):.2f}" if info_dict[symbol].get('beta') is not None else "N/A",
+                        'Beta': f"{beta_val:.2f}" if beta_val is not None else "N/A",
                         'RSI': f"{latest['RSI']:.1f}",
                         'MACD Hist': f"{latest['MACD_Histogram']:.3f}",
                         'BB Diff': bb_diff_str, # BB info added to summary
@@ -556,7 +620,7 @@ def main():
                         st.metric("1Y", "N/A")
                 
                 with col4:
-                    # ← Beta値を追加
+                    # Beta値の表示 (計算値を含む)
                     beta_value = info.get('beta')
                     if beta_value is not None:
                         st.metric("Beta", f"{beta_value:.2f}")
@@ -583,7 +647,7 @@ def main():
                 # Analysis text
                 st.markdown("#### 📋 Technical Summary")
                 
-                # ← Beta情報を追加
+                # Beta情報
                 beta_value = info.get('beta')
                 if beta_value is not None:
                     if beta_value > 1.2:
@@ -596,6 +660,9 @@ def main():
                         beta_desc = f"Market-like volatility ({beta_value:.2f})"
                         beta_emoji = "➡️"
                     st.write(f"{beta_emoji} **Beta:** {beta_desc}")
+                else:
+                    st.write(f"❓ **Beta:** N/A (Could not calculate or fetch)")
+
 
                 # Performance
                 perf_parts = []
