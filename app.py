@@ -57,10 +57,11 @@ def get_stock_info(symbol):
         return {
             'name': info.get('longName', symbol),
             'sector': info.get('sector', 'N/A'),
-            'industry': info.get('industry', 'N/A')
+            'industry': info.get('industry', 'N/A'),
+            'beta': info.get('beta', None)  # ← 追加
         }
     except:
-        return {'name': symbol, 'sector': symbol, 'industry': 'N/A'}
+        return {'name': symbol, 'sector': symbol, 'industry': 'N/A', 'beta': None}
 
 def calculate_returns(data):
     """Calculate YTD and 1Y returns"""
@@ -484,6 +485,7 @@ def main():
                         'Change %': f"{((latest['Close']/prev['Close'])-1)*100:+.2f}%",
                         'YTD': f"{ytd_return:+.2f}%" if ytd_return is not None else "N/A",
                         '1Y': f"{one_year_return:+.2f}%" if one_year_return is not None else "N/A",
+                        'Beta': f"{info_dict[symbol].get('beta', 'N/A'):.2f}" if info_dict[symbol].get('beta') is not None else "N/A",
                         'RSI': f"{latest['RSI']:.1f}",
                         'MACD Hist': f"{latest['MACD_Histogram']:.3f}",
                         'BB Diff': bb_diff_str, # BB info added to summary
@@ -554,12 +556,19 @@ def main():
                         st.metric("1Y", "N/A")
                 
                 with col4:
+                    # ← Beta値を追加
+                    beta_value = info.get('beta')
+                    if beta_value is not None:
+                        st.metric("Beta", f"{beta_value:.2f}")
+                    else:
+                        st.metric("Beta", "N/A")
+                with col5:
                     st.metric("RSI", f"{latest['RSI']:.1f}")
                 
-                with col5:
+                with col6:
                     st.metric("MACD", f"{latest['MACD']:.4f}")
                 
-                with col6:
+                with col7:
                     if not np.isnan(latest['MACD_Crossover_Days']):
                         cross_days = int(latest['MACD_Crossover_Days'])
                         cross_type = "Bull" if latest['MACD'] > latest['MACD_Signal'] else "Bear"
@@ -567,13 +576,27 @@ def main():
                     else:
                         st.metric("MACD Cross", "N/A")
                 
-                with col7:
+                with col8:
                     signal, color = calculate_signal_score(data)
                     st.metric("Signal", signal)
                 
                 # Analysis text
                 st.markdown("#### 📋 Technical Summary")
                 
+                # ← Beta情報を追加
+                beta_value = info.get('beta')
+                if beta_value is not None:
+                    if beta_value > 1.2:
+                        beta_desc = f"High volatility ({beta_value:.2f})"
+                        beta_emoji = "⚡"
+                    elif beta_value < 0.8:
+                        beta_desc = f"Low volatility ({beta_value:.2f})"
+                        beta_emoji = "🛡️"
+                    else:
+                        beta_desc = f"Market-like volatility ({beta_value:.2f})"
+                        beta_emoji = "➡️"
+                    st.write(f"{beta_emoji} **Beta:** {beta_desc}")
+
                 # Performance
                 perf_parts = []
                 if ytd_return is not None:
